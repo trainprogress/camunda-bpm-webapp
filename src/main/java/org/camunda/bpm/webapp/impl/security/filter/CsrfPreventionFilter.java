@@ -105,7 +105,7 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
     if ((isFetchRequest && isValidFetchRequest(request)) /*|| isTokenValid*/){
       // Fetch request OR valid token -> provide new token
-      fetchNewToken(request, response);
+      fetchToken(request, response);
     }
 
     filterChain.doFilter(request, response);
@@ -158,18 +158,19 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   // If the Request carries a valid token, or it is a Fetch request,
   // a new Token needs to be provided with the response.
-  protected void fetchNewToken(HttpServletRequest request, HttpServletResponse response) {
-    String newNonce = generateNonce();
+  protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
     HttpSession session = request.getSession(true);
 
+    String nonce = (session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) != null)?
+      (String) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : generateNonce();
 //    LRUCache<String> lruNonceCache = (session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) != null)?
 //      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : new LRUCache<String>(this.nonceCacheSize);
 //
 //    lruNonceCache.add(newNonce);
 //    session.setAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME, lruNonceCache);
 //    response.setHeader(CsrfConstants.CSRF_NONCE_COOKIE_NAME, newNonce);
-    session.setAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME, newNonce);
-    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_NONCE_COOKIE_NAME, newNonce);
+    session.setAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME, nonce);
+    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_NONCE_COOKIE_NAME, nonce);
     csrfCookie.setPath("/camunda");
     response.addCookie(csrfCookie);
   }
