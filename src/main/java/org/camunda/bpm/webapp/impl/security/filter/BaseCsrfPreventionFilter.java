@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 
 /**
  * This code was ported from the <code>CsrfPreventionFilterBase</code> class
- * of Apache Tomcat
+ * of Apache Tomcat.
  *
  * @author Nikola Koevski
  */
@@ -40,15 +40,15 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
   public void init(FilterConfig filterConfig) throws ServletException {
     try {
 
-//      String customDenyStatus = filterConfig.getInitParameter("denyStatus");
-//      if (!isBlank(customDenyStatus)) {
-//        setDenyStatus(Integer.valueOf(customDenyStatus));
-//      }
-//
-//      String newRandomClass = filterConfig.getInitParameter("randomClass");
-//      if (!isBlank(newRandomClass)) {
-//        setRandomClass(newRandomClass);
-//      }
+      String customDenyStatus = filterConfig.getInitParameter("denyStatus");
+      if (!isBlank(customDenyStatus)) {
+        setDenyStatus(Integer.valueOf(customDenyStatus));
+      }
+
+      String newRandomClass = filterConfig.getInitParameter("randomClass");
+      if (!isBlank(newRandomClass)) {
+        setRandomClass(newRandomClass);
+      }
 
       Class<?> clazz = Class.forName(randomClass);
       randomSource = (Random) clazz.getConstructor().newInstance();
@@ -132,6 +132,5 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
 
   @Override
   public void destroy() {
-
   }
 }

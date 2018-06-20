@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.Calendar;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -88,7 +89,7 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   protected static final Pattern NON_MODIFYING_METHODS_PATTERN = Pattern.compile("GET|HEAD|OPTIONS");
 
-  protected static final Pattern FETCH_REQUEST_URL_PATTERN = Pattern.compile(".*/camunda/api/admin/auth/user/.+/login/(cockpit|tasklist|admin|welcome|webapps)$");
+  protected static final Pattern DEFAULT_ENTRY_URL_PATTERN = Pattern.compile("^/api/admin/auth/user/.+/login/(cockpit|tasklist|admin|welcome|webapps)$");
 
   private final Set<String> entryPoints = new HashSet<String>();
 
@@ -104,23 +105,20 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
         setTargetOrigin(targetOrigin);
       }
 
-//      String tokenCacheSize = filterConfig.getInitParameter("tokenCacheSize");
-//      if (!isBlank(tokenCacheSize)) {
-//        int cacheSize = Integer.valueOf(tokenCacheSize);
-//        if (cacheSize > 0) {
-//          setTokenCacheSize(cacheSize);
-//        } else {
-//          throw new ServletException("CSRFPreventionFilter: Invalid CSRF Token cache size.");
-//        }
-//      }
-//
-//      String customEntryPoints = filterConfig.getInitParameter("entryPoints");
-//      if (!isBlank(customEntryPoints)) {
-//        String[] entryPointsArray = customEntryPoints.split(",");
-//        for (String entryPoint : entryPointsArray) {
-//          this.entryPoints.add(entryPoint.trim());
-//        }
-//      }
+      String tokenCacheSize = filterConfig.getInitParameter("tokenCacheSize");
+      if (!isBlank(tokenCacheSize)) {
+        int cacheSize = Integer.valueOf(tokenCacheSize);
+        if (cacheSize > 0) {
+          setTokenCacheSize(cacheSize);
+        } else {
+          throw new ServletException("CSRFPreventionFilter: Invalid CSRF Token cache size.");
+        }
+      }
+
+      String customEntryPoints = filterConfig.getInitParameter("entryPoints");
+      if (!isBlank(customEntryPoints)) {
+        setEntryPoints(customEntryPoints);
+      }
     } catch (MalformedURLException e) {
       throw new ServletException("CSRFPreventionFilter: Could not read target origin URL: " + e.getMessage());
     }
@@ -138,6 +136,10 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       // Not a fetch request -> validate token
       boolean isTokenValid = doSameOriginStandardHeadersVerification(request, response)
         && doTokenValidation(request, response);
+
+      if (!isTokenValid) {
+        return;
+      }
     }
 
     if (isNonModifyingRequest){
@@ -165,8 +167,7 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
   }
 
   protected boolean doSameOriginStandardHeadersVerification(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    // if target origin is not set, skip Same Origin
-    // with Standard Headers Verification
+    // if target origin is not set, skip Same Origin with Standard Headers Verification
     if (targetOrigin == null) {
       return true;
     }
@@ -220,31 +221,47 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
   // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
     HttpSession session = request.getSession();
-    String token = generateToken();
 
     LRUCache<String> lruTokenCache = (session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) != null)?
       (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : new LRUCache<String>(this.tokenCacheSize);
 
-    lruTokenCache.add(token);
+    String token = lruTokenCache.getLatestToken();
+    if (!lruTokenCache.isLatestTokenValid(500L)) {
+      token = generateToken();
+      lruTokenCache.add(token);
+    }
+
     session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, lruTokenCache);
     Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
     csrfCookie.setPath("/camunda");
     response.addCookie(csrfCookie);
   }
 
-  // Check if no token has been generated already,
-  // or if it's explicitly requested to be generated
-  protected boolean isFetchRequest(HttpServletRequest request) {
-    return FETCH_REQUEST_URL_PATTERN.matcher(request.getRequestURL().toString()).matches() && request.getSession().isNew();
-  }
-
   // A non-modifying request is one that is either a 'HTTP GET' request,
   // or is allowed explicitly through the 'entryPoints' parameter in the web.xml
   protected boolean isNonModifyingRequest(HttpServletRequest request) {
-    System.out.println("Request url: " + getRequestedPath(request));
     return NON_MODIFYING_METHODS_PATTERN.matcher(request.getMethod()).matches()
+        || DEFAULT_ENTRY_URL_PATTERN.matcher(getRequestedPath(request)).matches()
         || entryPoints.contains(getRequestedPath(request));
-//        || FETCH_REQUEST_URL_PATTERN.matcher(request.getRequestURL()).matches();
+
+  }
+
+  private String getRequestedPath(HttpServletRequest request) {
+    String path = request.getServletPath();
+
+    if (request.getPathInfo() != null) {
+      path = path + request.getPathInfo();
+    }
+
+    return path;
+  }
+
+  public URL getTargetOrigin() {
+    return targetOrigin;
+  }
+
+  public void setTargetOrigin(String targetOrigin) throws MalformedURLException {
+    this.targetOrigin = new URL(targetOrigin);
   }
 
   /**
@@ -274,24 +291,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return urlSet;
   }
 
-  private String getRequestedPath(HttpServletRequest request) {
-    String path = request.getServletPath();
-
-    if (request.getPathInfo() != null) {
-      path = path + request.getPathInfo();
-    }
-
-    return path;
-  }
-
-  public URL getTargetOrigin() {
-    return targetOrigin;
-  }
-
-  public void setTargetOrigin(String targetOrigin) throws MalformedURLException {
-    this.targetOrigin = new URL(targetOrigin);
-  }
-
   /**
    * Sets the number of previously issued tokens that will be cached on a LRU
    * basis to support parallel requests, limited use of the refresh and back
@@ -311,23 +310,42 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
     // Although the internal implementation uses a Map, this cache
     // implementation is only concerned with the keys.
-    private final Map<T,T> cache;
+    private T latestToken;
+    private long latestTokenCreationTime;
+    private int cacheSize;
+    private final Map<T,Long> cache;
 
     public LRUCache(final int cacheSize) {
-      cache = new LinkedHashMap<T,T>() {
+      this.latestToken = null;
+      this.latestTokenCreationTime = 0L;
+      this.cacheSize = cacheSize;
+      this.cache = new LinkedHashMap<T,Long>() {
 
         private static final long serialVersionUID = 1L;
 
         @Override
-        protected boolean removeEldestEntry(Map.Entry<T,T> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<T,Long> eldest) {
           return size() > cacheSize;
         }
       };
     }
 
+    public boolean isLatestTokenValid(long ttl) {
+      synchronized (cache) {
+        long now = Calendar.getInstance().getTimeInMillis();
+        if (cache.size() >= cacheSize && (now - latestTokenCreationTime < ttl)) {
+          return true;
+        }
+
+        return false;
+      }
+    }
+
     public void add(T key) {
       synchronized (cache) {
-        cache.put(key, null);
+        latestToken = key;
+        latestTokenCreationTime = Calendar.getInstance().getTimeInMillis();
+        cache.put(latestToken, latestTokenCreationTime);
       }
     }
 
@@ -335,6 +353,10 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       synchronized (cache) {
         return cache.containsKey(key);
       }
+    }
+
+    public T getLatestToken() {
+      return latestToken;
     }
   }
 }
