@@ -16,6 +16,7 @@ package org.camunda.bpm.webapp.impl.security.filter;
 import org.camunda.bpm.webapp.impl.security.filter.util.CsrfConstants;
 
 import javax.servlet.FilterChain;
+import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
@@ -25,6 +26,8 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
 import java.io.Serializable;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,9 +35,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Provides basic CSRF protection. The filter assumes that the
- * client side has adapted the transfer of the nonce through the 'X-CSRF-Token'
- * header.
+ * Provides basic CSRF protection implementing a Same Origin Standard Header verification (step 1)
+ * and a Synchronization Token with a cookie-stored token on the front-end.
  *
  * <pre>
  * Positive scenario:
@@ -47,7 +49,8 @@ import java.util.regex.Pattern;
  *              |---------------------------------|
  * JSESSIONID   |\                                |
  * X-CSRF-Token |                                 |
- * pair cached  | POST Request with valid nonce  \| JSESSIONID
+ * pair cached  | POST Request with valid token  \| JSESSIONID
+ *              | cookie                          |
  *              |---------------------------------| X-CSRF-Token
  *              |                                /| pair validation
  *              |/ Response to POST Request       |
@@ -57,16 +60,17 @@ import java.util.regex.Pattern;
  * Negative scenario:
  *           Client                            Server
  *              |                                 |
- *              | POST Request without nonce     \| JSESSIONID
- *              |---------------------------------| X-CSRF-Token
- *              |                                /| pair validation
+ *              | POST Request without token      | JSESSIONID
+ *              | cookie                         \| X-CSRF-Token
+ *              |---------------------------------| pair validation
+ *              |                                /|
  *              |/Request is rejected             |
  *              |---------------------------------|
  *              |\                                |
  *
  *           Client                            Server
  *              |                                 |
- *              | POST Request with invalid nonce\| JSESSIONID
+ *              | POST Request with invalid token\| JSESSIONID
  *              |---------------------------------| X-CSRF-Token
  *              |                                /| pair validation
  *              |/Request is rejected             |
@@ -84,10 +88,43 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   protected static final Pattern NON_MODIFYING_METHODS_PATTERN = Pattern.compile("GET|HEAD|OPTIONS");
 
-  private final Set<String> entryPoints = new HashSet<String>();
-  private final Set<String> pathsAcceptingParams = new HashSet<String>();
+  protected static final Pattern FETCH_REQUEST_URL_PATTERN = Pattern.compile(".*/camunda/api/admin/auth/user/.+/login/(cockpit|tasklist|admin|welcome|webapps)$");
 
-  private int nonceCacheSize = 5;
+  private final Set<String> entryPoints = new HashSet<String>();
+
+  private URL targetOrigin;
+
+  private int tokenCacheSize = 5;
+
+  @Override public void init(FilterConfig filterConfig) throws ServletException {
+    super.init(filterConfig);
+    try {
+      String targetOrigin = filterConfig.getInitParameter("targetOrigin");
+      if (!isBlank(targetOrigin)) {
+        setTargetOrigin(targetOrigin);
+      }
+
+//      String tokenCacheSize = filterConfig.getInitParameter("tokenCacheSize");
+//      if (!isBlank(tokenCacheSize)) {
+//        int cacheSize = Integer.valueOf(tokenCacheSize);
+//        if (cacheSize > 0) {
+//          setTokenCacheSize(cacheSize);
+//        } else {
+//          throw new ServletException("CSRFPreventionFilter: Invalid CSRF Token cache size.");
+//        }
+//      }
+//
+//      String customEntryPoints = filterConfig.getInitParameter("entryPoints");
+//      if (!isBlank(customEntryPoints)) {
+//        String[] entryPointsArray = customEntryPoints.split(",");
+//        for (String entryPoint : entryPointsArray) {
+//          this.entryPoints.add(entryPoint.trim());
+//        }
+//      }
+    } catch (MalformedURLException e) {
+      throw new ServletException("CSRFPreventionFilter: Could not read target origin URL: " + e.getMessage());
+    }
+  }
 
   @Override
   public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
@@ -95,16 +132,16 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     HttpServletRequest request = (HttpServletRequest) servletRequest;
     HttpServletResponse response = (HttpServletResponse) servletResponse;
 
-    boolean isFetchRequest = isNonModifyingRequest(request);
-    boolean isTokenValid = false;
+    boolean isNonModifyingRequest = isNonModifyingRequest(request);
 
-    if (!isFetchRequest) {
+    if (!isNonModifyingRequest) {
       // Not a fetch request -> validate token
-      isTokenValid = doTokenValidation(request, response);
+      boolean isTokenValid = doSameOriginStandardHeadersVerification(request, response)
+        && doTokenValidation(request, response);
     }
 
-    if ((isFetchRequest && isValidFetchRequest(request)) /*|| isTokenValid*/){
-      // Fetch request OR valid token -> provide new token
+    if (isNonModifyingRequest){
+      // Fetch request -> provide new token
       fetchToken(request, response);
     }
 
@@ -113,85 +150,106 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   // Validate request token value with session token values
   protected boolean doTokenValidation(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    HttpSession session = request.getSession(false);
+    HttpSession session = request.getSession();
 
-//    LRUCache<String> lruNonceCache = (session != null)?
-//      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : null;
-    String sessionNonce = (session != null)?
-      (String) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : null;
-    String requestNonce = retrieveRequestToken(request);
+    LRUCache<String> lruTokenCache = (session != null)?
+      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : null;
+    String cookieToken = retrieveCookieToken(request);
 
-//    if (lruNonceCache == null || requestNonce == null || !lruNonceCache.contains(requestNonce)) {
-    if (sessionNonce == null || requestNonce == null || !sessionNonce.equals(requestNonce)) {
-      response.addHeader(CsrfConstants.CSRF_NONCE_HEADER_NAME, CsrfConstants.CSRF_NONCE_HEADER_REQUIRED_VALUE);
-      response.sendError(getDenyStatus(), "Request contains an incorrect CSRF token.");
-
+    if (lruTokenCache == null || cookieToken == null || !lruTokenCache.contains(cookieToken)) {
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: incorrect or missing token in request.");
       return false;
     }
 
     return true;
   }
 
-  // The Token can be sent through the Request Header, or if not possible,
-  // as a Request Parameter. Note that the Requesting URL needs to be declared
-  // in the `pathsAcceptingParams` parameter in the web.xml then.
-  protected String retrieveRequestToken(HttpServletRequest request) {
-    String token = request.getHeader(CsrfConstants.CSRF_NONCE_HEADER_NAME);
+  protected boolean doSameOriginStandardHeadersVerification(HttpServletRequest request, HttpServletResponse response) throws IOException {
+    // if target origin is not set, skip Same Origin
+    // with Standard Headers Verification
+    if (targetOrigin == null) {
+      return true;
+    }
 
-    if ((token == null || token.isEmpty())
-      && pathsAcceptingParams.contains(getRequestedPath(request))) {
-
-      String[] params = request.getParameterValues(CsrfConstants.CSRF_NONCE_REQUEST_PARAM);
-      if (params != null && params.length > 0) {
-        String nonce = params[0];
-        for (String param : params) {
-          if (!nonce.equals(param)) {
-            return null;
-          }
-        }
-        return nonce;
+    String source = request.getHeader("Origin");
+    if (this.isBlank(source)) {
+      //If empty then fallback on "Referer" header
+      source = request.getHeader("Referer");
+      //If this one is empty too, an error is reported
+      if (this.isBlank(source)) {
+        response.sendError(HttpServletResponse.SC_FORBIDDEN,
+          "CSRFPreventionFilter: ORIGIN and REFERER request headers are not present.");
+        return false;
       }
+    }
+
+    //Compare the source against the expected target origin
+    URL sourceURL = new URL(source);
+    if (!this.targetOrigin.getProtocol().equals(sourceURL.getProtocol())
+      || !this.targetOrigin.getHost().equals(sourceURL.getHost())
+      || this.targetOrigin.getPort() != sourceURL.getPort()) {
+      //If any part of the URL doesn't match, an error is reported
+      response.sendError(HttpServletResponse.SC_FORBIDDEN,
+          String.format("CSRFPreventionFilter: Protocol/Host/Port does not fully match: (%s != %s) ",
+            this.targetOrigin, sourceURL));
+      return false;
+    }
+
+    return true;
+  }
+
+  // The Token is sent through a Cookie, or if not possible, as a Request Header.
+  protected String retrieveCookieToken(HttpServletRequest request) {
+    String token = null;
+
+    Cookie[] cookies = request.getCookies();
+    for (Cookie cookie : cookies) {
+      if (cookie.getName().equals(CsrfConstants.CSRF_TOKEN_COOKIE_NAME)) {
+        token = cookie.getValue();
+      }
+    }
+
+    // not really possible atm, but a good fallback practice
+    if (token == null || token.isEmpty()) {
+      token = request.getHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME);
     }
 
     return token;
   }
 
-  // If the Request carries a valid token, or it is a Fetch request,
-  // a new Token needs to be provided with the response.
+  // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
-    HttpSession session = request.getSession(true);
+    HttpSession session = request.getSession();
+    String token = generateToken();
 
-    String nonce = (session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) != null)?
-      (String) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : generateNonce();
-//    LRUCache<String> lruNonceCache = (session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) != null)?
-//      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) : new LRUCache<String>(this.nonceCacheSize);
-//
-//    lruNonceCache.add(newNonce);
-//    session.setAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME, lruNonceCache);
-//    response.setHeader(CsrfConstants.CSRF_NONCE_COOKIE_NAME, newNonce);
-    session.setAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME, nonce);
-    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_NONCE_COOKIE_NAME, nonce);
+    LRUCache<String> lruTokenCache = (session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) != null)?
+      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : new LRUCache<String>(this.tokenCacheSize);
+
+    lruTokenCache.add(token);
+    session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, lruTokenCache);
+    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
     csrfCookie.setPath("/camunda");
     response.addCookie(csrfCookie);
   }
 
   // Check if no token has been generated already,
   // or if it's explicitly requested to be generated
-  protected boolean isValidFetchRequest(HttpServletRequest request) {
-    return request.getSession(false).getAttribute(CsrfConstants.CSRF_NONCE_SESSION_ATTR_NAME) == null
-      || CsrfConstants.CSRF_NONCE_HEADER_FETCH_VALUE.equals(request.getHeader(CsrfConstants.CSRF_NONCE_HEADER_NAME));
+  protected boolean isFetchRequest(HttpServletRequest request) {
+    return FETCH_REQUEST_URL_PATTERN.matcher(request.getRequestURL().toString()).matches() && request.getSession().isNew();
   }
 
   // A non-modifying request is one that is either a 'HTTP GET' request,
   // or is allowed explicitly through the 'entryPoints' parameter in the web.xml
   protected boolean isNonModifyingRequest(HttpServletRequest request) {
+    System.out.println("Request url: " + getRequestedPath(request));
     return NON_MODIFYING_METHODS_PATTERN.matcher(request.getMethod()).matches()
         || entryPoints.contains(getRequestedPath(request));
+//        || FETCH_REQUEST_URL_PATTERN.matcher(request.getRequestURL()).matches();
   }
 
   /**
    * Entry points are URLs that will not be tested for the presence of a valid
-   * nonce. They are used to provide a way to navigate back to a protected
+   * token. They are used to provide a way to navigate back to a protected
    * application after navigating away from it. Entry points will be limited
    * to HTTP GET requests and should not trigger any security sensitive
    * actions.
@@ -201,26 +259,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
    */
   public void setEntryPoints(String entryPoints) {
     this.entryPoints.addAll(parseURLs(entryPoints));
-  }
-
-  /**
-   * A comma separated list of URLs that can accept nonces via request
-   * parameter 'X-CSRF-Token'. For use cases when a nonce information cannot
-   * be provided via header, one can provide it via request parameters. If
-   * there is a X-CSRF-Token header, it will be taken with preference over any
-   * parameter with the same name in the request. Request parameters cannot be
-   * used to fetch new nonce, only header.
-   *
-   * @param pathsList
-   *            Comma separated list of URLs to be configured as paths
-   *            accepting request parameters with nonce information.
-   */
-  public void setPathsAcceptingParams(String pathsList) {
-    this.pathsAcceptingParams.addAll(parseURLs(pathsList));
-  }
-
-  public Set<String> getPathsAcceptingParams() {
-    return pathsAcceptingParams;
   }
 
   private Set<String> parseURLs(String urlString) {
@@ -246,17 +284,25 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return path;
   }
 
+  public URL getTargetOrigin() {
+    return targetOrigin;
+  }
+
+  public void setTargetOrigin(String targetOrigin) throws MalformedURLException {
+    this.targetOrigin = new URL(targetOrigin);
+  }
+
   /**
-   * Sets the number of previously issued nonces that will be cached on a LRU
+   * Sets the number of previously issued tokens that will be cached on a LRU
    * basis to support parallel requests, limited use of the refresh and back
    * in the browser and similar behaviors that may result in the submission
-   * of a previous nonce rather than the current one. If not set, the default
+   * of a previous token rather than the current one. If not set, the default
    * value of 5 will be used.
    *
-   * @param nonceCacheSize    The number of nonces to cache
+   * @param tokenCacheSize    The number of tokens to cache
    */
-  public void setNonceCacheSize(int nonceCacheSize) {
-    this.nonceCacheSize = nonceCacheSize;
+  public void setTokenCacheSize(int tokenCacheSize) {
+    this.tokenCacheSize = tokenCacheSize;
   }
 
   protected static class LRUCache<T> implements Serializable {

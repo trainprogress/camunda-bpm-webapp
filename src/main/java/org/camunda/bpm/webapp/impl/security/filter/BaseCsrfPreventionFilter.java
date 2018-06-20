@@ -39,6 +39,17 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
   @Override
   public void init(FilterConfig filterConfig) throws ServletException {
     try {
+
+//      String customDenyStatus = filterConfig.getInitParameter("denyStatus");
+//      if (!isBlank(customDenyStatus)) {
+//        setDenyStatus(Integer.valueOf(customDenyStatus));
+//      }
+//
+//      String newRandomClass = filterConfig.getInitParameter("randomClass");
+//      if (!isBlank(newRandomClass)) {
+//        setRandomClass(newRandomClass);
+//      }
+
       Class<?> clazz = Class.forName(randomClass);
       randomSource = (Random) clazz.getConstructor().newInstance();
     } catch (ClassNotFoundException e) {
@@ -73,7 +84,7 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
   }
 
   /**
-   * Specify the class to use to generate the nonces. Must be an instance of
+   * Specify the class to use to generate the tokens. Must be an instance of
    * {@link Random}.
    *
    * @param randomClass
@@ -84,13 +95,12 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
   }
 
   /**
-   * Generate a once time token (nonce) for authenticating subsequent
-   * requests. The nonce generation is a simplified version of
-   * ManagerBase.generateSessionId().
+   * Generate a once time token for authenticating subsequent
+   * requests.
    *
-   * @return the generated nonce
+   * @return the generated token
    */
-  protected String generateNonce() {
+  protected String generateToken() {
     byte random[] = new byte[16];
 
     // Render the result as a String of hexadecimal digits
@@ -114,6 +124,10 @@ public abstract class BaseCsrfPreventionFilter implements Filter {
     }
 
     return buffer.toString();
+  }
+
+  protected boolean isBlank(String s) {
+    return s == null || s.trim().isEmpty();
   }
 
   @Override
