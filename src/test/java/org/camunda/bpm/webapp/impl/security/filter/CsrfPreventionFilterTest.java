@@ -1,20 +1,12 @@
 package org.camunda.bpm.webapp.impl.security.filter;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.powermock.api.mockito.PowerMockito.when;
-
-import org.camunda.bpm.engine.impl.util.ClockUtil;
-import org.camunda.bpm.engine.rest.spi.ProcessEngineProvider;
-import org.camunda.bpm.webapp.impl.util.ProcessEngineUtil;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
-import org.mockito.Mock;
 import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.rule.PowerMockRule;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockFilterConfig;
@@ -31,15 +23,12 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Date;
-import java.util.ServiceLoader;
 
 
 /**
  * @author Nikola Koevski
  */
 @RunWith(Parameterized.class)
-@PrepareForTest({ ProcessEngineUtil.class, ServiceLoader.class })
 @PowerMockIgnore("javax.security.*")
 public class CsrfPreventionFilterTest {
 
@@ -47,9 +36,6 @@ public class CsrfPreventionFilterTest {
 
   @Rule
   public PowerMockRule rule = new PowerMockRule();
-
-  @Mock
-  private ServiceLoader<ProcessEngineProvider> serviceLoader;
 
   protected Filter csrfPreventionFilter;
 
@@ -138,8 +124,6 @@ public class CsrfPreventionFilterTest {
 
         // TODO: search for a better solution for delay, ClockUtils doesn't work
         Thread.sleep(501L);
-//        Date now = new Date();
-//        ClockUtil.setCurrentTime(new Date(now.getTime() + 501L));
 
         // cache is full, sixth non-modifying request (ttl < 500ms) returns last token
         String token = performNonModifyingRequest(nonModifyingRequestUrl, session);

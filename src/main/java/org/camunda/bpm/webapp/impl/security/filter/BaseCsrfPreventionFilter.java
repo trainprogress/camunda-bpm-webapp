@@ -20,7 +20,7 @@ import javax.servlet.http.HttpServletResponse;
 import java.lang.reflect.InvocationTargetException;
 import java.security.SecureRandom;
 import java.util.Random;
-import java.util.regex.Pattern;
+
 
 /**
  * This code was ported from the <code>CsrfPreventionFilterBase</code> class
