@@ -154,12 +154,27 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
   protected boolean doTokenValidation(HttpServletRequest request, HttpServletResponse response) throws IOException {
     HttpSession session = request.getSession();
 
-    LRUCache<String> lruTokenCache = (session != null)?
-      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : null;
-    String cookieToken = retrieveCookieToken(request);
+    String tokenCookie = getCSRFTokenCookie(request);
+    if (isBlank(tokenCookie)) {
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via Cookie is absent/empty.");
+      return false;
+    }
 
-    if (lruTokenCache == null || cookieToken == null || !lruTokenCache.contains(cookieToken)) {
-      response.sendError(getDenyStatus(), "CSRFPreventionFilter: incorrect or missing token in request.");
+    String tokenHeader = getCSRFTokenHeader(request);
+    if (isBlank(tokenHeader)) {
+      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header is absent/empty.");
+      return false;
+    }
+
+    if (!tokenHeader.equals(tokenCookie)) {
+      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header and via Cookie are not equals.");
+      return false;
+    }
+
+    LRUCache<String> lruTokenCache = (session != null)? (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : null;
+
+    if (lruTokenCache == null || !lruTokenCache.contains(tokenHeader)) {
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token is invalid.");
       return false;
     }
 
@@ -190,13 +205,29 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       || !this.targetOrigin.getHost().equals(sourceURL.getHost())
       || this.targetOrigin.getPort() != sourceURL.getPort()) {
       //If any part of the URL doesn't match, an error is reported
-      response.sendError(HttpServletResponse.SC_FORBIDDEN,
-          String.format("CSRFPreventionFilter: Protocol/Host/Port does not fully match: (%s != %s) ",
-            this.targetOrigin, sourceURL));
+      response.sendError(HttpServletResponse.SC_FORBIDDEN, String.format("CSRFPreventionFilter: Protocol/Host/Port does not fully match: (%s != %s) ", this.targetOrigin, sourceURL));
       return false;
     }
 
     return true;
+  }
+
+  protected String getCSRFTokenCookie(HttpServletRequest request) {
+    String token = null;
+
+    Cookie[] cookies = request.getCookies();
+    for (Cookie cookie : cookies) {
+      if (cookie.getName().equals(CsrfConstants.CSRF_TOKEN_COOKIE_NAME)) {
+        token = cookie.getValue();
+        break;
+      }
+    }
+
+    return token;
+  }
+
+  protected String getCSRFTokenHeader(HttpServletRequest request) {
+    return request.getHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME);
   }
 
   // The Token is sent through a Cookie, or if not possible, as a Request Header.
@@ -225,16 +256,16 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     LRUCache<String> lruTokenCache = (session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) != null)?
       (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : new LRUCache<String>(this.tokenCacheSize);
 
-    String token = lruTokenCache.getLatestToken();
     if (!lruTokenCache.isLatestTokenValid(500L)) {
-      token = generateToken();
+      String token = generateToken();
       lruTokenCache.add(token);
+
+      session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, lruTokenCache);
+      Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
+      csrfCookie.setPath("/camunda");
+      response.addCookie(csrfCookie);
     }
 
-    session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, lruTokenCache);
-    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
-    csrfCookie.setPath("/camunda");
-    response.addCookie(csrfCookie);
   }
 
   // A non-modifying request is one that is either a 'HTTP GET' request,
