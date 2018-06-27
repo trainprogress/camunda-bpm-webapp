@@ -154,20 +154,9 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
   protected boolean doTokenValidation(HttpServletRequest request, HttpServletResponse response) throws IOException {
     HttpSession session = request.getSession();
 
-    String tokenCookie = getCSRFTokenCookie(request);
-    if (isBlank(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via Cookie is absent/empty.");
-      return false;
-    }
-
     String tokenHeader = getCSRFTokenHeader(request);
     if (isBlank(tokenHeader)) {
-      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header is absent/empty.");
-      return false;
-    }
-
-    if (!tokenHeader.equals(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header and via Cookie do not match.");
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via HTTP Header is absent/empty.");
       return false;
     }
 
