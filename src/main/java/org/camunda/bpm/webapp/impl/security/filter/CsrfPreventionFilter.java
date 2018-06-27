@@ -167,7 +167,7 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     }
 
     if (!tokenHeader.equals(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header and via Cookie are not equals.");
+      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header and via Cookie do not match.");
       return false;
     }
 
@@ -230,25 +230,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return request.getHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME);
   }
 
-  // The Token is sent through a Cookie, or if not possible, as a Request Header.
-  protected String retrieveCookieToken(HttpServletRequest request) {
-    String token = null;
-
-    Cookie[] cookies = request.getCookies();
-    for (Cookie cookie : cookies) {
-      if (cookie.getName().equals(CsrfConstants.CSRF_TOKEN_COOKIE_NAME)) {
-        token = cookie.getValue();
-      }
-    }
-
-    // not really possible atm, but a good fallback practice
-    if (token == null || token.isEmpty()) {
-      token = request.getHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME);
-    }
-
-    return token;
-  }
-
   // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
     HttpSession session = request.getSession();
@@ -274,7 +255,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return NON_MODIFYING_METHODS_PATTERN.matcher(request.getMethod()).matches()
         || DEFAULT_ENTRY_URL_PATTERN.matcher(getRequestedPath(request)).matches()
         || entryPoints.contains(getRequestedPath(request));
-
   }
 
   private String getRequestedPath(HttpServletRequest request) {
