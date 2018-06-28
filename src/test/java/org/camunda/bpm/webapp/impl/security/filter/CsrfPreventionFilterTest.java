@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 
+import static org.powermock.api.mockito.PowerMockito.when;
 
 /**
  * @author Nikola Koevski
@@ -33,6 +34,9 @@ import java.util.Collection;
 public class CsrfPreventionFilterTest {
 
   protected static final String SERVICE_PATH = "/camunda";
+  protected static final String CSRF_COOKIE_NAME = "XSRF-TOKEN";
+  protected static final String CSRF_HEADER_NAME = "X-XSRF-TOKEN";
+  protected static final String CSRF_HEADER_REQUIRED = "Required";
 
   @Rule
   public PowerMockRule rule = new PowerMockRule();
@@ -95,124 +99,104 @@ public class CsrfPreventionFilterTest {
 
   @Test
   public void testNonModifyingRequestTokenGeneration() throws IOException, ServletException {
-    performNonModifyingRequest(nonModifyingRequestUrl, new MockHttpSession());
+    performNonModifyingRequest(nonModifyingRequestUrl);
   }
 
   @Test
   public void testConsecutiveNonModifyingRequestTokenGeneration() throws IOException, ServletException {
-    MockHttpSession session = new MockHttpSession();
-
     // first non-modifying request
-    String firstToken = performNonModifyingRequest(nonModifyingRequestUrl, session);
+    String firstToken = performNonModifyingRequest(nonModifyingRequestUrl);
     // second non-modifying request
-    String secondToken = performNonModifyingRequest(nonModifyingRequestUrl, session);
+    String secondToken = performNonModifyingRequest(nonModifyingRequestUrl);
 
     Assert.assertNotEquals(firstToken, secondToken);
   }
 
   @Test
-  public void testNonCachedNonModifyingRequestTokenGeneration() throws IOException, ServletException {
-    try {
-      if (isModifyingFetchRequest) {
-        // first fill up the cache (default size is 5)
-        MockHttpSession session = new MockHttpSession();
-        performNonModifyingRequest(nonModifyingRequestUrl, session);
-        performNonModifyingRequest(nonModifyingRequestUrl, session);
-        performNonModifyingRequest(nonModifyingRequestUrl, session);
-        performNonModifyingRequest(nonModifyingRequestUrl, session);
-        String lastToken = performNonModifyingRequest(nonModifyingRequestUrl, session);
-
-        // TODO: search for a better solution for delay, ClockUtils doesn't work
-        Thread.sleep(501L);
-
-        // cache is full, sixth non-modifying request (ttl < 500ms) returns last token
-        String token = performNonModifyingRequest(nonModifyingRequestUrl, session);
-
-        Assert.assertNotEquals(lastToken, token);
-      }
-    } catch (InterruptedException e) {
-      // nop
-    }
-  }
-
-  @Test
-  public void testCachedTokenOnNonModifyingRequest() throws IOException, ServletException {
-    if (isModifyingFetchRequest) {
-      // first fill up the cache (default size is 5)
-      MockHttpSession session = new MockHttpSession();
-      performNonModifyingRequest(nonModifyingRequestUrl, session);
-      performNonModifyingRequest(nonModifyingRequestUrl, session);
-      performNonModifyingRequest(nonModifyingRequestUrl, session);
-      performNonModifyingRequest(nonModifyingRequestUrl, session);
-      String lastToken = performNonModifyingRequest(nonModifyingRequestUrl, session);
-
-      // cache is full, sixth non-modifying request (ttl < 500ms) returns last token
-      String token = performNonModifyingRequest(nonModifyingRequestUrl, session);
-
-      Assert.assertEquals(lastToken, token);
-    }
-  }
-
-  @Test
   public void testModifyingRequestTokenValidation() throws IOException, ServletException {
-    MockHttpSession session = new MockHttpSession();
     // first non-modifying request
-    String token = performNonModifyingRequest(nonModifyingRequestUrl, session);
+    String token = performNonModifyingRequest(nonModifyingRequestUrl);
 
     if (isModifyingFetchRequest) {
-      String secondToken = performNonModifyingRequest(modifyingRequestUrl, session);
+      String secondToken = performNonModifyingRequest(modifyingRequestUrl);
       Assert.assertNotEquals(token, secondToken);
     } else {
-      HttpServletResponse response = performModifyingRequest(token, session);
+      HttpServletResponse response = performModifyingRequest(token);
       Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
     }
   }
 
   @Test
   public void testModifyingRequestInvalidToken() throws IOException, ServletException {
-    MockHttpSession session = new MockHttpSession();
-    performNonModifyingRequest(nonModifyingRequestUrl, session);
+    String token = performNonModifyingRequest(nonModifyingRequestUrl);
 
     if (!isModifyingFetchRequest) {
-      HttpServletResponse response = performModifyingRequest("invalid token", session);
+      // invalid header token
+      MockHttpServletResponse response = performModifyingRequest("invalid header token", token);
+      Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
+//      Assert.assertEquals(CSRF_HEADER_REQUIRED, (String) response.getHeader(CSRF_HEADER_NAME));
+
+      // no header token
+//      MockHttpServletRequest modifyingRequest = new MockHttpServletRequest();
+//      modifyingRequest.setMethod("POST");
+//      modifyingRequest.setRequestURI(SERVICE_PATH  + modifyingRequestUrl);
+//      modifyingRequest.setContextPath(SERVICE_PATH);
+//      Cookie[] cookies = {new Cookie(CSRF_COOKIE_NAME, token)};
+//      modifyingRequest.setCookies(cookies);
+//
+//      applyFilter(modifyingRequest, response);
+//      Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
+//      Assert.assertEquals("", response.getErrorMessage());
+//      Assert.assertEquals(CSRF_HEADER_REQUIRED, (String) response.getHeader(CSRF_HEADER_NAME));
+
+      // invalid cookie token
+      response = performModifyingRequest(token, "invalid cookie token");
       Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
 
-      response = performModifyingRequest("", session);
-      Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
-
-      response = performModifyingRequest(null, session);
+      // null cookie token
+      response = performModifyingRequest(token, null);
       Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
     }
   }
 
-  protected String performNonModifyingRequest(String requestUrl, MockHttpSession session) throws IOException, ServletException {
+  protected String performNonModifyingRequest(String requestUrl) throws IOException, ServletException {
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     MockHttpServletRequest nonModifyingRequest = new MockHttpServletRequest();
     nonModifyingRequest.setMethod("GET");
-    nonModifyingRequest.setSession(session);
     nonModifyingRequest.setRequestURI(SERVICE_PATH  + requestUrl);
     nonModifyingRequest.setContextPath(SERVICE_PATH);
 
     applyFilter(nonModifyingRequest, response);
 
     Assert.assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-    Assert.assertNotNull(response.getCookie("XSRF-TOKEN"));
-    Assert.assertEquals(false, response.getCookie("XSRF-TOKEN").getValue().isEmpty());
 
-    return response.getCookie("XSRF-TOKEN").getValue();
+    Cookie cookieToken = response.getCookie(CSRF_COOKIE_NAME);
+    String headerToken = (String) response.getHeader(CSRF_HEADER_NAME);
+
+    Assert.assertNotNull(cookieToken);
+    Assert.assertNotNull(headerToken);
+    Assert.assertEquals("No Cookie Token!",false, cookieToken.getValue().isEmpty());
+    Assert.assertEquals("No HTTP Header Token!",false, headerToken.isEmpty());
+    Assert.assertEquals("Cookie and HTTP Header Tokens do not match!", cookieToken.getValue(), headerToken);
+
+    return headerToken;
   }
 
-  protected HttpServletResponse performModifyingRequest(String token, MockHttpSession session) throws IOException, ServletException {
+  protected MockHttpServletResponse performModifyingRequest(String token) throws IOException, ServletException {
+    return performModifyingRequest(token, token);
+  }
+
+  protected MockHttpServletResponse performModifyingRequest(String headerToken, String cookieToken) throws IOException, ServletException {
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     MockHttpServletRequest modifyingRequest = new MockHttpServletRequest();
     modifyingRequest.setMethod("POST");
-    modifyingRequest.setSession(session);
     modifyingRequest.setRequestURI(SERVICE_PATH  + modifyingRequestUrl);
     modifyingRequest.setContextPath(SERVICE_PATH);
 
-    Cookie[] cookies = {new Cookie("XSRF-TOKEN", token)};
+    modifyingRequest.addHeader(CSRF_HEADER_NAME, headerToken);
+    Cookie[] cookies = {new Cookie(CSRF_COOKIE_NAME, cookieToken)};
     modifyingRequest.setCookies(cookies);
 
     applyFilter(modifyingRequest, response);

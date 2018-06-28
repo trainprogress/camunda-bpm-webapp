@@ -89,13 +89,11 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   protected static final Pattern NON_MODIFYING_METHODS_PATTERN = Pattern.compile("GET|HEAD|OPTIONS");
 
-  protected static final Pattern DEFAULT_ENTRY_URL_PATTERN = Pattern.compile("^/api/admin/auth/user/.+/login/(cockpit|tasklist|admin|welcome|webapps)$");
+  protected static final Pattern DEFAULT_ENTRY_URL_PATTERN = Pattern.compile("^/api/admin/auth/user/.+/login/(cockpit|tasklist|admin|welcome)$");
 
   private final Set<String> entryPoints = new HashSet<String>();
 
   private URL targetOrigin;
-
-  private int tokenCacheSize = 5;
 
   @Override public void init(FilterConfig filterConfig) throws ServletException {
     super.init(filterConfig);
@@ -103,16 +101,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       String targetOrigin = filterConfig.getInitParameter("targetOrigin");
       if (!isBlank(targetOrigin)) {
         setTargetOrigin(targetOrigin);
-      }
-
-      String tokenCacheSize = filterConfig.getInitParameter("tokenCacheSize");
-      if (!isBlank(tokenCacheSize)) {
-        int cacheSize = Integer.valueOf(tokenCacheSize);
-        if (cacheSize > 0) {
-          setTokenCacheSize(cacheSize);
-        } else {
-          throw new ServletException("CSRFPreventionFilter: Invalid CSRF Token cache size.");
-        }
       }
 
       String customEntryPoints = filterConfig.getInitParameter("entryPoints");
@@ -152,8 +140,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   // Validate request token value with session token values
   protected boolean doTokenValidation(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    HttpSession session = request.getSession();
-
     String tokenCookie = getCSRFTokenCookie(request);
     if (isBlank(tokenCookie)) {
       response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via Cookie is absent/empty.");
@@ -162,19 +148,13 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
     String tokenHeader = getCSRFTokenHeader(request);
     if (isBlank(tokenHeader)) {
-      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header is absent/empty.");
+      response.setHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME, CsrfConstants.CSRF_TOKEN_HEADER_REQUIRED);
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via HTTP Header is absent/empty.");
       return false;
     }
 
     if (!tokenHeader.equals(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFValidationFilter: Token provided via HTTP Header and via Cookie do not match.");
-      return false;
-    }
-
-    LRUCache<String> lruTokenCache = (session != null)? (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : null;
-
-    if (lruTokenCache == null || !lruTokenCache.contains(tokenHeader)) {
-      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token is invalid.");
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via HTTP Header and via Cookie do not match.");
       return false;
     }
 
@@ -193,8 +173,7 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       source = request.getHeader("Referer");
       //If this one is empty too, an error is reported
       if (this.isBlank(source)) {
-        response.sendError(HttpServletResponse.SC_FORBIDDEN,
-          "CSRFPreventionFilter: ORIGIN and REFERER request headers are not present.");
+        response.sendError(HttpServletResponse.SC_FORBIDDEN, "CSRFPreventionFilter: ORIGIN and REFERER request headers are not present.");
         return false;
       }
     }
@@ -232,21 +211,10 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
-    HttpSession session = request.getSession();
-
-    LRUCache<String> lruTokenCache = (session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) != null)?
-      (LRUCache<String>) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) : new LRUCache<String>(this.tokenCacheSize);
-
-    if (!lruTokenCache.isLatestTokenValid(500L)) {
-      String token = generateToken();
-      lruTokenCache.add(token);
-
-      session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, lruTokenCache);
-      Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
-      csrfCookie.setPath("/camunda");
-      response.addCookie(csrfCookie);
-    }
-
+    String token = generateToken();
+    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
+    response.addCookie(csrfCookie);
+    response.setHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME, token);
   }
 
   // A non-modifying request is one that is either a 'HTTP GET' request,
@@ -271,6 +239,15 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return targetOrigin;
   }
 
+  /**
+   * Target origin is the application expected deployment domain, i.e. the domain
+   * name through which the webapps are accessed. If nothing is set, the "Same Origin
+   * with Standard Headers" verification is not performed.
+   *
+   * @param targetOrigin The application's domain name together with the protocol
+   *                     and port (ex. http://example.com:8080)
+   * @throws MalformedURLException
+   */
   public void setTargetOrigin(String targetOrigin) throws MalformedURLException {
     this.targetOrigin = new URL(targetOrigin);
   }
@@ -300,74 +277,5 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     }
 
     return urlSet;
-  }
-
-  /**
-   * Sets the number of previously issued tokens that will be cached on a LRU
-   * basis to support parallel requests, limited use of the refresh and back
-   * in the browser and similar behaviors that may result in the submission
-   * of a previous token rather than the current one. If not set, the default
-   * value of 5 will be used.
-   *
-   * @param tokenCacheSize    The number of tokens to cache
-   */
-  public void setTokenCacheSize(int tokenCacheSize) {
-    this.tokenCacheSize = tokenCacheSize;
-  }
-
-  protected static class LRUCache<T> implements Serializable {
-
-    private static final long serialVersionUID = 1L;
-
-    // Although the internal implementation uses a Map, this cache
-    // implementation is only concerned with the keys.
-    private T latestToken;
-    private long latestTokenCreationTime;
-    private int cacheSize;
-    private final Map<T,Long> cache;
-
-    public LRUCache(final int cacheSize) {
-      this.latestToken = null;
-      this.latestTokenCreationTime = 0L;
-      this.cacheSize = cacheSize;
-      this.cache = new LinkedHashMap<T,Long>() {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<T,Long> eldest) {
-          return size() > cacheSize;
-        }
-      };
-    }
-
-    public boolean isLatestTokenValid(long ttl) {
-      synchronized (cache) {
-        long now = Calendar.getInstance().getTimeInMillis();
-        if (cache.size() >= cacheSize && (now - latestTokenCreationTime < ttl)) {
-          return true;
-        }
-
-        return false;
-      }
-    }
-
-    public void add(T key) {
-      synchronized (cache) {
-        latestToken = key;
-        latestTokenCreationTime = Calendar.getInstance().getTimeInMillis();
-        cache.put(latestToken, latestTokenCreationTime);
-      }
-    }
-
-    public boolean contains(T key) {
-      synchronized (cache) {
-        return cache.containsKey(key);
-      }
-    }
-
-    public T getLatestToken() {
-      return latestToken;
-    }
   }
 }
