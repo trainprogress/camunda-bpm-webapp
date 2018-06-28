@@ -134,20 +134,19 @@ public class CsrfPreventionFilterTest {
       // invalid header token
       MockHttpServletResponse response = performModifyingRequest("invalid header token", token);
       Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
-//      Assert.assertEquals(CSRF_HEADER_REQUIRED, (String) response.getHeader(CSRF_HEADER_NAME));
 
       // no header token
-//      MockHttpServletRequest modifyingRequest = new MockHttpServletRequest();
-//      modifyingRequest.setMethod("POST");
-//      modifyingRequest.setRequestURI(SERVICE_PATH  + modifyingRequestUrl);
-//      modifyingRequest.setContextPath(SERVICE_PATH);
-//      Cookie[] cookies = {new Cookie(CSRF_COOKIE_NAME, token)};
-//      modifyingRequest.setCookies(cookies);
-//
-//      applyFilter(modifyingRequest, response);
-//      Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
-//      Assert.assertEquals("", response.getErrorMessage());
-//      Assert.assertEquals(CSRF_HEADER_REQUIRED, (String) response.getHeader(CSRF_HEADER_NAME));
+      MockHttpServletRequest modifyingRequest = new MockHttpServletRequest();
+      modifyingRequest.setMethod("POST");
+      modifyingRequest.setRequestURI(SERVICE_PATH  + modifyingRequestUrl);
+      modifyingRequest.setContextPath(SERVICE_PATH);
+      Cookie[] cookies = {new Cookie(CSRF_COOKIE_NAME, token)};
+      modifyingRequest.setCookies(cookies);
+
+      applyFilter(modifyingRequest, response);
+      Assert.assertEquals(Response.Status.FORBIDDEN.getStatusCode(), response.getStatus());
+      Assert.assertEquals("", response.getErrorMessage());
+      Assert.assertEquals(CSRF_HEADER_REQUIRED, (String) response.getHeader(CSRF_HEADER_NAME));
 
       // invalid cookie token
       response = performModifyingRequest(token, "invalid cookie token");

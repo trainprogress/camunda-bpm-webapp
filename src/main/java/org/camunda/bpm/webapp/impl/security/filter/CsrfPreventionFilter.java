@@ -191,18 +191,21 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return true;
   }
 
-  protected String getCSRFTokenCookie(HttpServletRequest request) {
-    String token = null;
-
+  protected Cookie getCSRFCookie(HttpServletRequest request) {
     Cookie[] cookies = request.getCookies();
-    for (Cookie cookie : cookies) {
-      if (cookie.getName().equals(CsrfConstants.CSRF_TOKEN_COOKIE_NAME)) {
-        token = cookie.getValue();
-        break;
+    if (cookies != null) {
+      for (Cookie cookie : cookies) {
+        if (cookie.getName().equals(CsrfConstants.CSRF_TOKEN_COOKIE_NAME)) {
+          return cookie;
+        }
       }
     }
 
-    return token;
+    return new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, null);
+  }
+
+  protected String getCSRFTokenCookie(HttpServletRequest request) {
+    return getCSRFCookie(request).getValue();
   }
 
   protected String getCSRFTokenHeader(HttpServletRequest request) {
@@ -212,7 +215,11 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
   // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
     String token = generateToken();
-    Cookie csrfCookie = new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, token);
+
+    Cookie csrfCookie = getCSRFCookie(request);
+    csrfCookie.setValue(token);
+    csrfCookie.setPath(request.getContextPath());
+
     response.addCookie(csrfCookie);
     response.setHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME, token);
   }
