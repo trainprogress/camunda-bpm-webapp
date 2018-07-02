@@ -14,6 +14,7 @@
 package org.camunda.bpm.webapp.impl.security.filter;
 
 import org.camunda.bpm.webapp.impl.security.filter.util.CsrfConstants;
+import org.jboss.com.sun.corba.se.spi.protocol.CorbaServerRequestDispatcher;
 
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -51,7 +52,7 @@ import java.util.regex.Pattern;
  * JSESSIONID   |\                                |
  * X-CSRF-Token |                                 |
  * pair cached  | POST Request with valid token  \| JSESSIONID
- *              | cookie                          |
+ *              | header                          |
  *              |---------------------------------| X-CSRF-Token
  *              |                                /| pair validation
  *              |/ Response to POST Request       |
@@ -62,7 +63,7 @@ import java.util.regex.Pattern;
  *           Client                            Server
  *              |                                 |
  *              | POST Request without token      | JSESSIONID
- *              | cookie                         \| X-CSRF-Token
+ *              | header                         \| X-CSRF-Token
  *              |---------------------------------| pair validation
  *              |                                /|
  *              |/Request is rejected             |
@@ -140,11 +141,6 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
 
   // Validate request token value with session token values
   protected boolean doTokenValidation(HttpServletRequest request, HttpServletResponse response) throws IOException {
-    String tokenCookie = getCSRFTokenCookie(request);
-    if (isBlank(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via Cookie is absent/empty.");
-      return false;
-    }
 
     String tokenHeader = getCSRFTokenHeader(request);
     if (isBlank(tokenHeader)) {
@@ -153,8 +149,10 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
       return false;
     }
 
-    if (!tokenHeader.equals(tokenCookie)) {
-      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Token provided via HTTP Header and via Cookie do not match.");
+    HttpSession session = request.getSession();
+    String tokenSession = (String) session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME);
+    if (isBlank(tokenSession) || !tokenSession.equals(tokenHeader)) {
+      response.sendError(getDenyStatus(), "CSRFPreventionFilter: Invalid HTTP Header Token.");
       return false;
     }
 
@@ -204,24 +202,25 @@ public class CsrfPreventionFilter extends BaseCsrfPreventionFilter {
     return new Cookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, null);
   }
 
-  protected String getCSRFTokenCookie(HttpServletRequest request) {
-    return getCSRFCookie(request).getValue();
-  }
-
   protected String getCSRFTokenHeader(HttpServletRequest request) {
     return request.getHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME);
   }
 
   // If the Request is a Fetch request, a new Token needs to be provided with the response.
   protected void fetchToken(HttpServletRequest request, HttpServletResponse response) {
-    String token = generateToken();
+    HttpSession session = request.getSession();
 
-    Cookie csrfCookie = getCSRFCookie(request);
-    csrfCookie.setValue(token);
-    csrfCookie.setPath(request.getContextPath());
+    if (session.getAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME) == null) {
+      String token = generateToken();
 
-    response.addCookie(csrfCookie);
-    response.setHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME, token);
+      Cookie csrfCookie = getCSRFCookie(request);
+      csrfCookie.setValue(token);
+      csrfCookie.setPath(request.getContextPath());
+
+      session.setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, token);
+      response.addCookie(csrfCookie);
+      response.setHeader(CsrfConstants.CSRF_TOKEN_HEADER_NAME, token);
+    }
   }
 
   // A non-modifying request is one that is either a 'HTTP GET' request,
