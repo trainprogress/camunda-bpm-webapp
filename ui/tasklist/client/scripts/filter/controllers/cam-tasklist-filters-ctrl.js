@@ -6,7 +6,7 @@ var template = fs.readFileSync(__dirname + '/../modals/cam-tasklist-filter-modal
 
 module.exports = [
   '$scope',
-  '$modal',
+  '$uibModal',
   '$q',
   'camAPI',
   '$timeout',

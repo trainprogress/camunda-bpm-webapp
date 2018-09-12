@@ -13,7 +13,7 @@ module.exports = [ '$routeProvider', function($routeProvider) {
   $routeProvider.when('/users/:userId', {
     template: template,
     controller: [
-      '$scope', 'page', '$routeParams', 'camAPI', 'Notifications', '$location', '$modal', 'authentication', 'unescape', '$translate',
+      '$scope', 'page', '$routeParams', 'camAPI', 'Notifications', '$location', '$uibModal', 'authentication', 'unescape', '$translate',
       function($scope,   page,   $routeParams,   camAPI,   Notifications,   $location,   $modal,   authentication, unescape, $translate) {
 
         var AuthorizationResource = camAPI.resource('authorization'),
