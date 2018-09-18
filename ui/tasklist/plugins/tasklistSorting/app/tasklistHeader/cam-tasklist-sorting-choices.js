@@ -272,6 +272,7 @@ module.exports = [
           scope.sortings.push(newSorting);
 
           scope.updateSortings();
+          scope.openDropdownNew = false;
 
           $timeout(function() {
             var element = document.querySelector('[cam-sorting-choices] li:last-child a.dropdown-toggle');
