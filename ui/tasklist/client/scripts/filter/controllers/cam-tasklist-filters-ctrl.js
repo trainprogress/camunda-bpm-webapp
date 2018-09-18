@@ -93,7 +93,15 @@ module.exports = [
     $scope.openModal = function($event, filter) {
       $event.stopPropagation();
 
+      var handleDialogClose = function() {
+        $timeout(function() {
+          filtersData.changed('filters');
+          focusFilter(filter);
+        }, 20);
+      };
+
       $modal.open({
+        animation: true,
         windowClass: 'filter-modal',
         size: 'lg',
         controller: 'camFilterModalCtrl',
@@ -103,13 +111,7 @@ module.exports = [
           'filtersData': function() { return filtersData; }
         }
 
-      }).result.then(function() {
-        filtersData.changed('filters');
-        focusFilter(filter);
-      }, function() {
-        filtersData.changed('filters');
-        focusFilter(filter);
-      });
+      }).result.then(handleDialogClose, handleDialogClose);
 
     };
 

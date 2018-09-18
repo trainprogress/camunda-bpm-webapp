@@ -336,6 +336,7 @@ module.exports = [
           var groupsChanged;
 
           $modal.open({
+            animation: true,
           // creates a child scope of a provided scope
             scope: $scope,
           //TODO: extract filter edit modal class to super style sheet

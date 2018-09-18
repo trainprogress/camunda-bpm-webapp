@@ -35,6 +35,7 @@ module.exports = [
           $event.preventDefault();
           $event.stopPropagation();
           $modal.open({
+            animation: true,
             template: modalTemplate,
 
             windowClass: 'variable-modal-detail',

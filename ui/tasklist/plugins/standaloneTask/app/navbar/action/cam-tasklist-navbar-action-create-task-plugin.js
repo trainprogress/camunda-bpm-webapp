@@ -17,6 +17,7 @@ var Controller = [
 
     $scope.open = function() {
       var modalInstance = $modal.open({
+        animation: true,
         size: 'lg',
         controller: 'camCreateTaskModalCtrl',
         template: createTaskModalTemplate

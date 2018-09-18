@@ -33,6 +33,7 @@ var Controller = [
 
     $scope.showHelp = function() {
       var modalInstance = $modal.open({
+        animation: true,
       // creates a child scope of a provided scope
         scope: $scope,
         windowClass: 'shortcut-modal',

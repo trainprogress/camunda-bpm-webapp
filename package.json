@@ -30,7 +30,7 @@
     "angular-data-depend": "git://github.com/camunda-third-party/angular-data-depend.git#8e3b66914c611069e3698fd5d4275e6cf8055d01",
     "angular-moment": "0.9.0",
     "angular-route": "1.7.4",
-    "bootstrap": "3.3.6",
+    "bootstrap": "3.3.7",
     "bpmn-font": "0.2.0",
     "camunda-bpm-sdk-js": "git://github.com/camunda/camunda-bpm-sdk-js#angularjs17",
     "camunda-commons-ui": "git://github.com/camunda/camunda-commons-ui#angularjs17",

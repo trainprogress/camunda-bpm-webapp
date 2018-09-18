@@ -77,6 +77,7 @@ var Controller = [
     $scope.open = function() {
       processData.set('processDefinitionQuery', angular.copy(DEFAULT_PROCESS_DEFINITION_QUERY));
       var modalInstance = $modal.open({
+        animation: true,
         size: 'lg',
         controller: 'camProcessStartModalCtrl',
         template: template,
