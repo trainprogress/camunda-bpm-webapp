@@ -23,6 +23,7 @@ import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.core.Context;
+import javax.ws.rs.core.NewCookie;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
@@ -31,6 +32,8 @@ import org.camunda.bpm.engine.identity.Group;
 import org.camunda.bpm.engine.identity.Tenant;
 import org.camunda.bpm.engine.identity.User;
 import org.camunda.bpm.engine.rest.exception.InvalidRequestException;
+import org.camunda.bpm.webapp.impl.security.filter.CsrfPreventionFilter;
+import org.camunda.bpm.webapp.impl.security.filter.util.CsrfConstants;
 import org.camunda.bpm.webapp.impl.util.ProcessEngineUtil;
 
 /**
@@ -98,11 +101,16 @@ public class UserAuthenticationResource {
       return forbidden();
     }
 
+    String csrfToken = "";
     if (request != null) {
       Authentications.revalidateSession(request, authentication);
+      csrfToken = CsrfPreventionFilter.setCSRFToken(request);
     }
 
-    return Response.ok(AuthenticationDto.fromAuthentication(authentication)).build();
+    return Response.ok(AuthenticationDto.fromAuthentication(authentication))
+      .header(CsrfConstants.CSRF_TOKEN_HEADER_NAME, csrfToken)
+      .cookie(new NewCookie(CsrfConstants.CSRF_TOKEN_COOKIE_NAME, csrfToken))
+      .build();
   }
 
   protected List<String> getGroupsOfUser(ProcessEngine engine, String userId) {

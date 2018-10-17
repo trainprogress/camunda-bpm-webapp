@@ -89,9 +89,9 @@ public class CsrfPreventionFilter implements Filter {
 
   private final Object SESSION_LOCK = new Object();
 
-  private String randomClass = SecureRandom.class.getName();
+  private static String randomClass = SecureRandom.class.getName();
 
-  private Random randomSource;
+  private static Random randomSource;
 
   private URL targetOrigin;
 
@@ -157,7 +157,7 @@ public class CsrfPreventionFilter implements Filter {
       }
     } else {
       // Fetch request -> provide new token
-      setCSRFToken(request, response);
+//      setCSRFToken(request, response);
     }
 
     filterChain.doFilter(request, response);
@@ -262,6 +262,13 @@ public class CsrfPreventionFilter implements Filter {
     }
   }
 
+  public static String setCSRFToken(HttpServletRequest request) {
+    String token = generateCSRFToken();
+    request.getSession().setAttribute(CsrfConstants.CSRF_TOKEN_SESSION_ATTR_NAME, token);
+
+    return token;
+  }
+
   public URL getTargetOrigin() {
     return targetOrigin;
   }
@@ -338,7 +345,7 @@ public class CsrfPreventionFilter implements Filter {
    *
    * @return the generated token
    */
-  protected String generateCSRFToken() {
+  protected static String generateCSRFToken() {
     byte random[] = new byte[16];
 
     // Render the result as a String of hexadecimal digits
